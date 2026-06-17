@@ -11,13 +11,22 @@ export async function handleModel(bot: TelegramBot, msg: Message) {
     const session = getSession(msg.from!.id);
     const models = await fetchModels();
 
-    const modelList = models.map((m) => `• ${m.id}`).join("\n");
-    bot.sendMessage(
-      chatId,
-      `Current model: ${session.currentModel}\n\n` +
-        `Available models:\n${modelList}\n\n` +
-        `Use /model <name> to change`,
-    );
+    // Group by provider
+    const grouped: Record<string, string[]> = {};
+    for (const m of models) {
+      if (!grouped[m.provider]) grouped[m.provider] = [];
+      grouped[m.provider].push(m.id);
+    }
+
+    let modelList = `Current model: ${session.currentModel}\n\n`;
+    for (const [provider, providerModels] of Object.entries(grouped)) {
+      modelList += `[${provider}]\n`;
+      modelList += providerModels.map((id) => `  • ${id}`).join("\n");
+      modelList += "\n\n";
+    }
+    modelList += `Use /model <name> to change`;
+
+    bot.sendMessage(chatId, modelList);
     return;
   }
 
@@ -34,5 +43,8 @@ export async function handleModel(bot: TelegramBot, msg: Message) {
   }
 
   updateModel(msg.from!.id, modelName);
-  bot.sendMessage(chatId, `Model changed to: ${modelName}`);
+  bot.sendMessage(
+    chatId,
+    `Model changed to: ${modelName} (${validModel.provider})`,
+  );
 }

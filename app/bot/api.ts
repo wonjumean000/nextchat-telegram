@@ -14,12 +14,12 @@ interface ChatOptions {
 interface ModelInfo {
   id: string;
   name: string;
+  provider: string;
 }
 
-// Cache for fetched models
 let cachedModels: ModelInfo[] | null = null;
 let cacheTimestamp = 0;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000;
 
 function getProviderConfig(provider: string) {
   const configs: Record<string, { baseUrl: string; apiKeyEnv: string }> = {
@@ -48,10 +48,6 @@ function getProviderConfig(provider: string) {
       baseUrl: process.env.DEEPSEEK_URL || "https://api.deepseek.com",
       apiKeyEnv: "DEEPSEEK_API_KEY",
     },
-    Qwen: {
-      baseUrl: process.env.ALIBABA_URL || "https://dashscope.aliyuncs.com/api/",
-      apiKeyEnv: "ALIBABA_API_KEY",
-    },
   };
   return configs[provider] || configs.OrcaRouter;
 }
@@ -62,52 +58,85 @@ export async function fetchModels(provider?: string): Promise<ModelInfo[]> {
     return cachedModels;
   }
 
-  const targetProvider = provider || "OrcaRouter";
-  const config = getProviderConfig(targetProvider);
-  const apiKey = process.env[config.apiKeyEnv];
+  const allModels: ModelInfo[] = [];
 
-  if (!apiKey) {
-    return getDefaultModels();
-  }
+  // Fetch from both providers
+  const providers = ["OrcaRouter", "Venice"];
+  for (const p of providers) {
+    const config = getProviderConfig(p);
+    const apiKey = process.env[config.apiKeyEnv];
+    if (!apiKey) continue;
 
-  try {
-    const response = await axios.get(`${config.baseUrl}/v1/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      timeout: 10000,
-    });
+    try {
+      const response = await axios.get(`${config.baseUrl}/v1/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 10000,
+      });
 
-    const models = (response.data.data || response.data || []).map(
-      (m: any) => ({
-        id: m.id,
-        name: m.name || m.id,
-      }),
-    );
-
-    if (models.length > 0) {
-      cachedModels = models;
-      cacheTimestamp = now;
-      return models;
+      const models = (response.data.data || response.data || []).map(
+        (m: any) => ({
+          id: m.id,
+          name: m.name || m.id,
+          provider: p,
+        }),
+      );
+      allModels.push(...models);
+    } catch {
+      // Skip failed provider
     }
-    return getDefaultModels();
-  } catch {
-    return getDefaultModels();
   }
+
+  if (allModels.length > 0) {
+    cachedModels = allModels;
+    cacheTimestamp = now;
+    return allModels;
+  }
+
+  return getDefaultModels();
 }
 
 function getDefaultModels(): ModelInfo[] {
   return [
-    { id: "llama-3.3-70b", name: "Llama 3.3 70B" },
-    { id: "llama-3.1-405b", name: "Llama 3.1 405B" },
-    { id: "mistral-large", name: "Mistral Large" },
-    { id: "qwen-2.5-72b", name: "Qwen 2.5 72B" },
-    { id: "deepseek-r1", name: "DeepSeek R1" },
-    { id: "gemma-2-27b", name: "Gemma 2 27B" },
-    { id: "gpt-4o", name: "GPT-4o" },
-    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
-    { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet" },
-    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+    { id: "llama-3.3-70b", name: "Llama 3.3 70B", provider: "OrcaRouter" },
+    { id: "llama-3.1-405b", name: "Llama 3.1 405B", provider: "OrcaRouter" },
+    { id: "mistral-large", name: "Mistral Large", provider: "OrcaRouter" },
+    { id: "qwen-2.5-72b", name: "Qwen 2.5 72B", provider: "OrcaRouter" },
+    { id: "deepseek-r1", name: "DeepSeek R1", provider: "OrcaRouter" },
+    { id: "gemma-2-27b", name: "Gemma 2 27B", provider: "OrcaRouter" },
+    { id: "llama-3.3-70b", name: "Llama 3.3 70B", provider: "Venice" },
+    { id: "llama-3.1-405b", name: "Llama 3.1 405B", provider: "Venice" },
+    { id: "mistral-large", name: "Mistral Large", provider: "Venice" },
   ];
+}
+
+// Compress messages to reduce token usage
+function compressMessages(messages: ChatMessage[]): ChatMessage[] {
+  if (messages.length <= 4) return messages;
+
+  const systemMessages = messages.filter((m) => m.role === "system");
+  const chatMessages = messages.filter((m) => m.role !== "system");
+
+  // Keep system messages + last 10 chat messages
+  const recentMessages = chatMessages.slice(-10);
+
+  // Summarize older messages if needed
+  if (chatMessages.length > 10) {
+    const olderMessages = chatMessages.slice(0, -10);
+    const summary = olderMessages
+      .map((m) => `${m.role}: ${m.content.substring(0, 100)}`)
+      .join("\n");
+
+    return [
+      ...systemMessages,
+      {
+        role: "system",
+        content: `Previous conversation summary:\n${summary}`,
+      },
+      ...recentMessages,
+    ];
+  }
+
+  return [...systemMessages, ...recentMessages];
 }
 
 export async function chatWithAI(options: ChatOptions): Promise<string> {
@@ -119,12 +148,15 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
     throw new Error(`Missing API key for provider: ${provider}`);
   }
 
+  // Compress messages to save tokens
+  const compressedMessages = compressMessages(messages);
+
   if (provider === "Claude") {
     const response = await axios.post(
       `${config.baseUrl}/v1/messages`,
       {
         model,
-        messages: messages.filter((m) => m.role !== "system"),
+        messages: compressedMessages.filter((m) => m.role !== "system"),
         max_tokens: 4096,
       },
       {
@@ -139,7 +171,7 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
   }
 
   if (provider === "GeminiPro") {
-    const contents = messages
+    const contents = compressedMessages
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
@@ -157,7 +189,7 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
   // OpenAI-compatible APIs
   const response = await axios.post(
     `${config.baseUrl}/v1/chat/completions`,
-    { model, messages },
+    { model, messages: compressedMessages },
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,
