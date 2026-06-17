@@ -7,13 +7,15 @@ export interface BotSession {
   lastActive: Date;
 }
 
+// In-memory store (will be lost between serverless function calls)
+// For production, use Vercel KV or database
 const sessions = new Map<number, BotSession>();
 
 export function getSession(userId: number): BotSession {
   if (!sessions.has(userId)) {
     sessions.set(userId, {
       userId,
-      currentModel: "gpt-4o-mini",
+      currentModel: "llama-3.3-70b",
       conversationHistory: [],
       createdAt: new Date(),
       lastActive: new Date(),
@@ -47,4 +49,15 @@ export function addMessage(
 
 export function getHistory(userId: number) {
   return getSession(userId).conversationHistory;
+}
+
+// Cleanup old sessions (call periodically)
+export function cleanupSessions(): void {
+  const now = Date.now();
+  const maxAge = 30 * 60 * 1000; // 30 minutes
+  for (const [userId, session] of sessions.entries()) {
+    if (now - session.lastActive.getTime() > maxAge) {
+      sessions.delete(userId);
+    }
+  }
 }

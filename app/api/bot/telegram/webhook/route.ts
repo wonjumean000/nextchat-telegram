@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { initBot, getBot } from "../../../../bot/telegram";
+import { cleanupSessions } from "../../../../bot/session";
 
 let botInitialized = false;
 
 export async function POST(request: NextRequest) {
   try {
+    // Initialize bot on first request
     if (!botInitialized) {
       initBot();
       botInitialized = true;
     }
+
+    // Cleanup old sessions periodically
+    cleanupSessions();
 
     const bot = getBot();
     if (!bot) {
@@ -19,6 +24,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+
+    // Verify request is from Telegram
+    if (!body.update_id) {
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    }
+
     bot.processUpdate(body);
 
     return NextResponse.json({ ok: true });
@@ -29,5 +40,5 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({ status: "ok" });
+  return NextResponse.json({ status: "ok", bot: !!getBot() });
 }

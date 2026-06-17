@@ -2,7 +2,9 @@ import axios from "axios";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  content:
+    | string
+    | Array<{ type: string; text?: string; image_url?: { url: string } }>;
 }
 
 interface ChatOptions {
@@ -59,9 +61,8 @@ export async function fetchModels(provider?: string): Promise<ModelInfo[]> {
   }
 
   const allModels: ModelInfo[] = [];
-
-  // Fetch from both providers
   const providers = ["OrcaRouter", "Venice"];
+
   for (const p of providers) {
     const config = getProviderConfig(p);
     const apiKey = process.env[config.apiKeyEnv];
@@ -102,36 +103,30 @@ function getDefaultModels(): ModelInfo[] {
     { id: "mistral-large", name: "Mistral Large", provider: "OrcaRouter" },
     { id: "qwen-2.5-72b", name: "Qwen 2.5 72B", provider: "OrcaRouter" },
     { id: "deepseek-r1", name: "DeepSeek R1", provider: "OrcaRouter" },
-    { id: "gemma-2-27b", name: "Gemma 2 27B", provider: "OrcaRouter" },
     { id: "llama-3.3-70b", name: "Llama 3.3 70B", provider: "Venice" },
-    { id: "llama-3.1-405b", name: "Llama 3.1 405B", provider: "Venice" },
     { id: "mistral-large", name: "Mistral Large", provider: "Venice" },
   ];
 }
 
-// Compress messages to reduce token usage
 function compressMessages(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length <= 4) return messages;
 
   const systemMessages = messages.filter((m) => m.role === "system");
   const chatMessages = messages.filter((m) => m.role !== "system");
-
-  // Keep system messages + last 10 chat messages
   const recentMessages = chatMessages.slice(-10);
 
-  // Summarize older messages if needed
   if (chatMessages.length > 10) {
     const olderMessages = chatMessages.slice(0, -10);
     const summary = olderMessages
-      .map((m) => `${m.role}: ${m.content.substring(0, 100)}`)
+      .map((m) => {
+        const content = typeof m.content === "string" ? m.content : "[image]";
+        return `${m.role}: ${content.substring(0, 100)}`;
+      })
       .join("\n");
 
     return [
       ...systemMessages,
-      {
-        role: "system",
-        content: `Previous conversation summary:\n${summary}`,
-      },
+      { role: "system", content: `Previous conversation summary:\n${summary}` },
       ...recentMessages,
     ];
   }
@@ -148,17 +143,19 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
     throw new Error(`Missing API key for provider: ${provider}`);
   }
 
-  // Compress messages to save tokens
   const compressedMessages = compressMessages(messages);
 
   if (provider === "Claude") {
+    const claudeMessages = compressedMessages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : "[content]",
+      }));
+
     const response = await axios.post(
       `${config.baseUrl}/v1/messages`,
-      {
-        model,
-        messages: compressedMessages.filter((m) => m.role !== "system"),
-        max_tokens: 4096,
-      },
+      { model, messages: claudeMessages, max_tokens: 4096 },
       {
         headers: {
           "x-api-key": apiKey,
@@ -175,7 +172,9 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
+        parts: [
+          { text: typeof m.content === "string" ? m.content : "[content]" },
+        ],
       }));
 
     const response = await axios.post(
@@ -187,9 +186,14 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
   }
 
   // OpenAI-compatible APIs
+  const openaiMessages = compressedMessages.map((m) => ({
+    role: m.role,
+    content: typeof m.content === "string" ? m.content : "[content]",
+  }));
+
   const response = await axios.post(
     `${config.baseUrl}/v1/chat/completions`,
-    { model, messages: compressedMessages },
+    { model, messages: openaiMessages },
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -204,4 +208,10 @@ export function getProviderFromModel(model: string): string {
   if (model.startsWith("claude-")) return "Claude";
   if (model.startsWith("gemini-")) return "GeminiPro";
   return "OrcaRouter";
+}
+
+export function verifyTelegramWebhook(body: any): boolean {
+  const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secretToken) return true; // Skip verification if not set
+  return body._secret === secretToken;
 }
