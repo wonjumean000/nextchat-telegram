@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchModels } from "../../../../bot/api";
+import { fetchModels } from "../../bot/api";
 
 export async function GET() {
   try {
