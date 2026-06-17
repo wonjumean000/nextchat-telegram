@@ -7,5 +7,15 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ["/api/auth/:path*"],
+  matcher: [
+    /*
+     * Protect all routes except:
+     * - /auth/login (login page)
+     * - /api/auth (NextAuth)
+     * - /api/bot/telegram/webhook (Telegram webhook)
+     * - /_next (Next.js internals)
+     * - /static (static files)
+     */
+    "/((?!auth/login|api/auth|api/bot/telegram/webhook|_next|static|favicon.ico).*)",
+  ],
 };
