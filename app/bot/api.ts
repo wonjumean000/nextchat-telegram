@@ -11,6 +11,16 @@ interface ChatOptions {
   provider: string;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+}
+
+// Cache for fetched models
+let cachedModels: ModelInfo[] | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 function getProviderConfig(provider: string) {
   const configs: Record<string, { baseUrl: string; apiKeyEnv: string }> = {
     OrcaRouter: {
@@ -44,6 +54,60 @@ function getProviderConfig(provider: string) {
     },
   };
   return configs[provider] || configs.OrcaRouter;
+}
+
+export async function fetchModels(provider?: string): Promise<ModelInfo[]> {
+  const now = Date.now();
+  if (cachedModels && now - cacheTimestamp < CACHE_TTL) {
+    return cachedModels;
+  }
+
+  const targetProvider = provider || "OrcaRouter";
+  const config = getProviderConfig(targetProvider);
+  const apiKey = process.env[config.apiKeyEnv];
+
+  if (!apiKey) {
+    return getDefaultModels();
+  }
+
+  try {
+    const response = await axios.get(`${config.baseUrl}/v1/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      timeout: 10000,
+    });
+
+    const models = (response.data.data || response.data || []).map(
+      (m: any) => ({
+        id: m.id,
+        name: m.name || m.id,
+      }),
+    );
+
+    if (models.length > 0) {
+      cachedModels = models;
+      cacheTimestamp = now;
+      return models;
+    }
+    return getDefaultModels();
+  } catch {
+    return getDefaultModels();
+  }
+}
+
+function getDefaultModels(): ModelInfo[] {
+  return [
+    { id: "llama-3.3-70b", name: "Llama 3.3 70B" },
+    { id: "llama-3.1-405b", name: "Llama 3.1 405B" },
+    { id: "mistral-large", name: "Mistral Large" },
+    { id: "qwen-2.5-72b", name: "Qwen 2.5 72B" },
+    { id: "deepseek-r1", name: "DeepSeek R1" },
+    { id: "gemma-2-27b", name: "Gemma 2 27B" },
+    { id: "gpt-4o", name: "GPT-4o" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+    { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
+    { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet" },
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+  ];
 }
 
 export async function chatWithAI(options: ChatOptions): Promise<string> {
@@ -90,7 +154,7 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
     return response.data.candidates[0].content.parts[0].text;
   }
 
-  // OpenAI-compatible APIs (OrcaRouter, Venice, GPT, DeepSeek, etc.)
+  // OpenAI-compatible APIs
   const response = await axios.post(
     `${config.baseUrl}/v1/chat/completions`,
     { model, messages },
@@ -107,6 +171,5 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
 export function getProviderFromModel(model: string): string {
   if (model.startsWith("claude-")) return "Claude";
   if (model.startsWith("gemini-")) return "GeminiPro";
-  // Default to OrcaRouter for all other models
   return "OrcaRouter";
 }
