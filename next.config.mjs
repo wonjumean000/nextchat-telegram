@@ -33,6 +33,7 @@ const nextConfig = {
   experimental: {
     forceSwcTransforms: true,
   },
+  transpilePackages: ["@upstash/redis", "nanoid"],
 };
 
 const CorsHeaders = [
