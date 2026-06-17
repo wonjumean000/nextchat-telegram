@@ -230,7 +230,7 @@ export function SessionConfigModel(props: { onClose: () => void }) {
   );
 }
 
-function PromptToast(props: {
+export function PromptToast(props: {
   showToast?: boolean;
   showModal?: boolean;
   setShowModal: (_: boolean) => void;
@@ -986,7 +986,7 @@ export function ShortcutKeyModal(props: { onClose: () => void }) {
   );
 }
 
-function _Chat() {
+function InternalChat() {
   type RenderMessage = ChatMessage & { preview?: boolean };
 
   const chatStore = useChatStore();
@@ -2167,5 +2167,5 @@ function _Chat() {
 export function Chat() {
   const chatStore = useChatStore();
   const session = chatStore.currentSession();
-  return <_Chat key={session.id}></_Chat>;
+  return <InternalChat key={session.id}></InternalChat>;
 }
