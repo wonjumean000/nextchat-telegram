@@ -7,22 +7,32 @@ export interface BotSession {
   lastActive: Date;
 }
 
-// In-memory store (will be lost between serverless function calls)
-// For production, use Vercel KV or database
+// In-memory store
+// Note: Sessions reset on cold starts (Vercel serverless)
+// For persistent sessions, use Vercel KV or database
 const sessions = new Map<number, BotSession>();
 
+const DEFAULT_MODEL = "llama-3.3-70b";
+const MAX_HISTORY = 20;
+const SESSION_TTL = 30 * 60 * 1000; // 30 minutes
+
 export function getSession(userId: number): BotSession {
-  if (!sessions.has(userId)) {
-    sessions.set(userId, {
-      userId,
-      currentModel: "llama-3.3-70b",
-      conversationHistory: [],
-      createdAt: new Date(),
-      lastActive: new Date(),
-    });
+  const existing = sessions.get(userId);
+  if (existing) {
+    existing.lastActive = new Date();
+    return existing;
   }
-  const session = sessions.get(userId)!;
-  session.lastActive = new Date();
+
+  const session: BotSession = {
+    userId,
+    currentModel: DEFAULT_MODEL,
+    conversationHistory: [],
+    createdAt: new Date(),
+    lastActive: new Date(),
+  };
+
+  sessions.set(userId, session);
+  cleanupOldSessions();
   return session;
 }
 
@@ -42,8 +52,10 @@ export function addMessage(
 ): void {
   const session = getSession(userId);
   session.conversationHistory.push({ role, content });
-  if (session.conversationHistory.length > 20) {
-    session.conversationHistory = session.conversationHistory.slice(-20);
+  if (session.conversationHistory.length > MAX_HISTORY) {
+    session.conversationHistory = session.conversationHistory.slice(
+      -MAX_HISTORY,
+    );
   }
 }
 
@@ -51,12 +63,10 @@ export function getHistory(userId: number) {
   return getSession(userId).conversationHistory;
 }
 
-// Cleanup old sessions (call periodically)
-export function cleanupSessions(): void {
+function cleanupOldSessions(): void {
   const now = Date.now();
-  const maxAge = 30 * 60 * 1000; // 30 minutes
   for (const [userId, session] of sessions.entries()) {
-    if (now - session.lastActive.getTime() > maxAge) {
+    if (now - session.lastActive.getTime() > SESSION_TTL) {
       sessions.delete(userId);
     }
   }

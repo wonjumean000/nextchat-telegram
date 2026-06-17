@@ -4,7 +4,7 @@ import { getSession, addMessage, getHistory } from "../session";
 import { chatWithAI, getProviderFromModel } from "../api";
 import { SUPPORTED_LANGUAGES } from "../constants";
 
-export async function handleTranslate(
+export function handleTranslate(
   bot: TelegramBot,
   msg: Message,
   args: string[],
@@ -35,31 +35,31 @@ export async function handleTranslate(
     return;
   }
 
-  await bot.sendChatAction(chatId, "typing");
+  bot.sendChatAction(chatId, "typing");
 
-  try {
-    const session = getSession(userId);
-    const langName = SUPPORTED_LANGUAGES[targetLang];
+  const session = getSession(userId);
+  const langName = SUPPORTED_LANGUAGES[targetLang];
 
-    const prompt = `Translate the following text to ${langName}. Only provide the translation, no explanations:\n\n"${text}"`;
+  const prompt = `Translate the following text to ${langName}. Only provide the translation, no explanations:\n\n"${text}"`;
 
-    addMessage(userId, "user", prompt);
+  addMessage(userId, "user", prompt);
 
-    const provider = getProviderFromModel(session.currentModel);
-    const messages = getHistory(userId).map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
+  const provider = getProviderFromModel(session.currentModel);
+  const messages = getHistory(userId).map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
 
-    const response = await chatWithAI({
-      messages,
-      model: session.currentModel,
-      provider,
+  chatWithAI({
+    messages,
+    model: session.currentModel,
+    provider,
+  })
+    .then((response) => {
+      addMessage(userId, "assistant", response);
+      bot.sendMessage(chatId, `Translation (${langName}):\n\n${response}`);
+    })
+    .catch((error) => {
+      bot.sendMessage(chatId, `Error: ${error.message}`);
     });
-
-    addMessage(userId, "assistant", response);
-    bot.sendMessage(chatId, `Translation (${langName}):\n\n${response}`);
-  } catch (error: any) {
-    bot.sendMessage(chatId, `Error: ${error.message}`);
-  }
 }

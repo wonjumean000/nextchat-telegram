@@ -11,7 +11,6 @@ export async function handleModel(bot: TelegramBot, msg: Message) {
     const session = getSession(msg.from!.id);
     const models = await fetchModels();
 
-    // Group by provider
     const grouped: Record<string, string[]> = {};
     for (const m of models) {
       if (!grouped[m.provider]) grouped[m.provider] = [];

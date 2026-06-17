@@ -13,9 +13,10 @@ export const config = {
      * - /auth/login (login page)
      * - /api/auth (NextAuth)
      * - /api/bot/telegram/webhook (Telegram webhook)
+     * - /api/models (model list endpoint)
      * - /_next (Next.js internals)
      * - /static (static files)
      */
-    "/((?!auth/login|api/auth|api/bot/telegram/webhook|_next|static|favicon.ico).*)",
+    "/((?!auth/login|api/auth|api/bot/telegram/webhook|api/models|_next|static|favicon.ico).*)",
   ],
 };
