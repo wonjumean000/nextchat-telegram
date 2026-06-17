@@ -3,38 +3,40 @@ import type { Message } from "node-telegram-bot-api";
 import { getSession, addMessage, getHistory } from "../session";
 import { chatWithAI, getProviderFromModel } from "../api";
 
-export function handleMessage(bot: TelegramBot, msg: Message) {
+export async function handleMessage(bot: TelegramBot, msg: Message) {
   const chatId = msg.chat.id;
   const userId = msg.from!.id;
   const text = msg.text;
 
   if (!text) return;
 
-  addMessage(userId, "user", text);
-  bot.sendChatAction(chatId, "typing");
+  await addMessage(userId, "user", text);
+  await bot.sendChatAction(chatId, "typing");
 
-  const session = getSession(userId);
-  const provider = getProviderFromModel(session.currentModel);
-  const messages = getHistory(userId).map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: m.content,
-  }));
+  try {
+    const session = await getSession(userId);
+    const provider = getProviderFromModel(session.currentModel);
+    const history = await getHistory(userId);
+    const messages = history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
 
-  chatWithAI({
-    messages,
-    model: session.currentModel,
-    provider,
-  })
-    .then((response) => {
-      addMessage(userId, "assistant", response);
-      const chunks = splitMessage(response, 4000);
-      chunks.forEach((chunk, i) => {
-        setTimeout(() => bot.sendMessage(chatId, chunk), i * 100);
-      });
-    })
-    .catch((error) => {
-      bot.sendMessage(chatId, `Error: ${error.message}`);
+    const response = await chatWithAI({
+      messages,
+      model: session.currentModel,
+      provider,
     });
+
+    await addMessage(userId, "assistant", response);
+
+    const chunks = splitMessage(response, 4000);
+    for (let i = 0; i < chunks.length; i++) {
+      await bot.sendMessage(chatId, chunks[i]);
+    }
+  } catch (error: any) {
+    bot.sendMessage(chatId, `Error: ${error.message}`);
+  }
 }
 
 function splitMessage(text: string, maxLength: number): string[] {

@@ -8,7 +8,7 @@ export async function handleModel(bot: TelegramBot, msg: Message) {
   const args = msg.text?.split(" ").slice(1) || [];
 
   if (args.length === 0) {
-    const session = getSession(msg.from!.id);
+    const session = await getSession(msg.from!.id);
     const models = await fetchModels();
 
     const grouped: Record<string, string[]> = {};
@@ -41,7 +41,7 @@ export async function handleModel(bot: TelegramBot, msg: Message) {
     return;
   }
 
-  updateModel(msg.from!.id, modelName);
+  await updateModel(msg.from!.id, modelName);
   bot.sendMessage(
     chatId,
     `Model changed to: ${modelName} (${validModel.provider})`,

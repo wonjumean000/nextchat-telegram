@@ -1,73 +1,114 @@
+import { Redis } from "@upstash/redis";
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL || "",
+  token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
+});
+
 export interface BotSession {
   userId: number;
   username?: string;
   currentModel: string;
   conversationHistory: Array<{ role: string; content: string }>;
-  createdAt: Date;
-  lastActive: Date;
+  createdAt: string;
+  lastActive: string;
 }
 
-// In-memory store
-// Note: Sessions reset on cold starts (Vercel serverless)
-// For persistent sessions, use Vercel KV or database
-const sessions = new Map<number, BotSession>();
+const SESSION_PREFIX = "bot:session:";
+const SESSION_TTL = 30 * 60; // 30 minutes
 
-const DEFAULT_MODEL = "llama-3.3-70b";
-const MAX_HISTORY = 20;
-const SESSION_TTL = 30 * 60 * 1000; // 30 minutes
+function isRedisConfigured(): boolean {
+  return !!(
+    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  );
+}
 
-export function getSession(userId: number): BotSession {
-  const existing = sessions.get(userId);
+// In-memory fallback when Redis is not configured
+const memorySessions = new Map<number, BotSession>();
+
+export async function getSession(userId: number): Promise<BotSession> {
+  if (isRedisConfigured()) {
+    const key = `${SESSION_PREFIX}${userId}`;
+    const existing = await redis.get<BotSession>(key);
+
+    if (existing) {
+      existing.lastActive = new Date().toISOString();
+      await redis.set(key, existing, { ex: SESSION_TTL });
+      return existing;
+    }
+
+    const session: BotSession = {
+      userId,
+      currentModel: "llama-3.3-70b",
+      conversationHistory: [],
+      createdAt: new Date().toISOString(),
+      lastActive: new Date().toISOString(),
+    };
+
+    await redis.set(key, session, { ex: SESSION_TTL });
+    return session;
+  }
+
+  // Fallback to memory
+  const existing = memorySessions.get(userId);
   if (existing) {
-    existing.lastActive = new Date();
+    existing.lastActive = new Date().toISOString();
     return existing;
   }
 
   const session: BotSession = {
     userId,
-    currentModel: DEFAULT_MODEL,
+    currentModel: "llama-3.3-70b",
     conversationHistory: [],
-    createdAt: new Date(),
-    lastActive: new Date(),
+    createdAt: new Date().toISOString(),
+    lastActive: new Date().toISOString(),
   };
 
-  sessions.set(userId, session);
-  cleanupOldSessions();
+  memorySessions.set(userId, session);
   return session;
 }
 
-export function clearSession(userId: number): void {
-  sessions.delete(userId);
+export async function clearSession(userId: number): Promise<void> {
+  if (isRedisConfigured()) {
+    await redis.del(`${SESSION_PREFIX}${userId}`);
+  } else {
+    memorySessions.delete(userId);
+  }
 }
 
-export function updateModel(userId: number, model: string): void {
-  const session = getSession(userId);
+export async function updateModel(
+  userId: number,
+  model: string,
+): Promise<void> {
+  const session = await getSession(userId);
   session.currentModel = model;
+
+  if (isRedisConfigured()) {
+    await redis.set(`${SESSION_PREFIX}${userId}`, session, { ex: SESSION_TTL });
+  } else {
+    memorySessions.set(userId, session);
+  }
 }
 
-export function addMessage(
+export async function addMessage(
   userId: number,
   role: "user" | "assistant",
   content: string,
-): void {
-  const session = getSession(userId);
+): Promise<void> {
+  const session = await getSession(userId);
   session.conversationHistory.push({ role, content });
-  if (session.conversationHistory.length > MAX_HISTORY) {
-    session.conversationHistory = session.conversationHistory.slice(
-      -MAX_HISTORY,
-    );
+  if (session.conversationHistory.length > 20) {
+    session.conversationHistory = session.conversationHistory.slice(-20);
+  }
+
+  if (isRedisConfigured()) {
+    await redis.set(`${SESSION_PREFIX}${userId}`, session, { ex: SESSION_TTL });
+  } else {
+    memorySessions.set(userId, session);
   }
 }
 
-export function getHistory(userId: number) {
-  return getSession(userId).conversationHistory;
-}
-
-function cleanupOldSessions(): void {
-  const now = Date.now();
-  for (const [userId, session] of sessions.entries()) {
-    if (now - session.lastActive.getTime() > SESSION_TTL) {
-      sessions.delete(userId);
-    }
-  }
+export async function getHistory(userId: number) {
+  const session = await getSession(userId);
+  return session.conversationHistory;
 }

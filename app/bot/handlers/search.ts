@@ -10,7 +10,11 @@ interface SearchResult {
   url: string;
 }
 
-export function handleSearch(bot: TelegramBot, msg: Message, query: string) {
+export async function handleSearch(
+  bot: TelegramBot,
+  msg: Message,
+  query: string,
+) {
   const chatId = msg.chat.id;
   const userId = msg.from!.id;
 
@@ -19,47 +23,45 @@ export function handleSearch(bot: TelegramBot, msg: Message, query: string) {
     return;
   }
 
-  bot.sendChatAction(chatId, "typing");
+  await bot.sendChatAction(chatId, "typing");
   bot.sendMessage(chatId, `Searching: ${query}...`);
 
-  searchWeb(query)
-    .then((results) => {
-      if (results.length === 0) {
-        bot.sendMessage(chatId, "No search results found.");
-        return;
-      }
+  try {
+    const results = await searchWeb(query);
 
-      const searchContext = results
-        .slice(0, 5)
-        .map((r, i) => `${i + 1}. ${r.title}\n${r.snippet}\n${r.url}`)
-        .join("\n\n");
+    if (results.length === 0) {
+      bot.sendMessage(chatId, "No search results found.");
+      return;
+    }
 
-      const prompt = `Based on these search results, answer the question: "${query}"\n\nSearch results:\n${searchContext}`;
+    const searchContext = results
+      .slice(0, 5)
+      .map((r, i) => `${i + 1}. ${r.title}\n${r.snippet}\n${r.url}`)
+      .join("\n\n");
 
-      addMessage(userId, "user", prompt);
+    const prompt = `Based on these search results, answer the question: "${query}"\n\nSearch results:\n${searchContext}`;
 
-      const session = getSession(userId);
-      const provider = getProviderFromModel(session.currentModel);
-      const messages = getHistory(userId).map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+    await addMessage(userId, "user", prompt);
 
-      return chatWithAI({
-        messages,
-        model: session.currentModel,
-        provider,
-      });
-    })
-    .then((response) => {
-      if (response) {
-        addMessage(userId, "assistant", response);
-        bot.sendMessage(chatId, response);
-      }
-    })
-    .catch((error) => {
-      bot.sendMessage(chatId, `Search error: ${error.message}`);
+    const session = await getSession(userId);
+    const provider = getProviderFromModel(session.currentModel);
+    const history = await getHistory(userId);
+    const messages = history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+
+    const response = await chatWithAI({
+      messages,
+      model: session.currentModel,
+      provider,
     });
+
+    await addMessage(userId, "assistant", response);
+    bot.sendMessage(chatId, response);
+  } catch (error: any) {
+    bot.sendMessage(chatId, `Search error: ${error.message}`);
+  }
 }
 
 async function searchWeb(query: string): Promise<SearchResult[]> {
