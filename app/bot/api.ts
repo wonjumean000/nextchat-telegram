@@ -13,6 +13,14 @@ interface ChatOptions {
 
 function getProviderConfig(provider: string) {
   const configs: Record<string, { baseUrl: string; apiKeyEnv: string }> = {
+    OrcaRouter: {
+      baseUrl: process.env.ORCAROUTER_URL || "https://api.orcarouter.com",
+      apiKeyEnv: "ORCAROUTER_API_KEY",
+    },
+    Venice: {
+      baseUrl: process.env.VENICE_URL || "https://api.venice.ai",
+      apiKeyEnv: "VENICE_API_KEY",
+    },
     GPT: {
       baseUrl: process.env.BASE_URL || "https://api.openai.com",
       apiKeyEnv: "OPENAI_API_KEY",
@@ -35,7 +43,7 @@ function getProviderConfig(provider: string) {
       apiKeyEnv: "ALIBABA_API_KEY",
     },
   };
-  return configs[provider] || configs.GPT;
+  return configs[provider] || configs.OrcaRouter;
 }
 
 export async function chatWithAI(options: ChatOptions): Promise<string> {
@@ -82,7 +90,7 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
     return response.data.candidates[0].content.parts[0].text;
   }
 
-  // OpenAI-compatible APIs (GPT, DeepSeek, Qwen, etc.)
+  // OpenAI-compatible APIs (OrcaRouter, Venice, GPT, DeepSeek, etc.)
   const response = await axios.post(
     `${config.baseUrl}/v1/chat/completions`,
     { model, messages },
@@ -97,10 +105,8 @@ export async function chatWithAI(options: ChatOptions): Promise<string> {
 }
 
 export function getProviderFromModel(model: string): string {
-  if (model.startsWith("gpt-")) return "GPT";
   if (model.startsWith("claude-")) return "Claude";
   if (model.startsWith("gemini-")) return "GeminiPro";
-  if (model.startsWith("deepseek-")) return "DeepSeek";
-  if (model.startsWith("qwen-")) return "Qwen";
-  return "GPT";
+  // Default to OrcaRouter for all other models
+  return "OrcaRouter";
 }
